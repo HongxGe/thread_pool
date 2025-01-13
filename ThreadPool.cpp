@@ -3,7 +3,7 @@
 #include <thread>
 #include <iostream>
 
-const int TASK_MAX_THREADHOLD = 1024;
+const int TASK_MAX_THREADHOLD = 4;
 
 ThreadPool::ThreadPool()
         : initThreadSize_(4)
@@ -25,8 +25,39 @@ void ThreadPool::setTaskQueueMaxThreadHold(int threadHold) {
     taskQueueThreadHold_ = threadHold;
 }
 
-// 给线程池提交任务
+// 给线程池提交任务  用户向线程池里面的任务队列提交任务 生产者
 void ThreadPool::submitTask(std::shared_ptr<Task> sp) {
+    // 获取锁
+    std::unique_lock<std::mutex> lock(taskQueueMtx_);
+
+    // 线程的通信： 等待任务队列有空余
+    /*这里wait方法有两种重载实现*/
+    /*1*/
+    // if (tasksQueue_.size() == TASK_MAX_THREADHOLD) {
+    //     nofull_.wait(lock);
+    // }
+        //条件变量的wait重载
+        //para1：用到的unique_lock锁
+        //para2：等待该条件成立
+    /*2*/
+    //nofull_.wait(lock, [&]()-> bool {return tasksQueue_.size() < TASK_MAX_THREADHOLD;});
+    //用户提交任务，最长不能阻塞超过1s，否则判断任务提交失败，返回
+    if(!nofull_.wait_for(lock, std::chrono::seconds(1), 
+        [&]()->bool{return tasksQueue_.size() < (size_t)TASK_MAX_THREADHOLD;}))
+    {
+        // 表示nofull_等待1s，条件依然没有满足
+        std::cerr << "task queue is full, submit task fail." << std::endl;
+        return;
+    }
+
+    std::cout << "tid:" << std::this_thread::get_id()
+            << "将任务放到任务队列中!" << std::endl;
+    // 如果为空，把任务放到任务队列中
+    tasksQueue_.emplace(sp);
+    taskSize_++;
+    // 提示消费者任务队列不为空 在noempty_提示,通知消费者，可以赶紧分配任务
+    noempty_.notify_all();
+
 
 }
 
@@ -37,7 +68,8 @@ void ThreadPool::start(int initThreadSize) {
 
     // 创建线程对象的时候，把线程函数给到thread线程对象
     for (int i = 0; i < initThreadSize_; ++i) {
-        threads_.emplace_back(new Thread(std::bind(&ThreadPool::ThreadFunc, this)));
+        auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::ThreadFunc, this));
+        threads_.emplace_back(std::move(ptr));
     }
 
     // 启动所有线程
@@ -47,11 +79,49 @@ void ThreadPool::start(int initThreadSize) {
 
 }
 
-// 定义线程函数
+// 定义线程函数  线程池里面所有的线程从任务队列里面消费任务  消费者
 void ThreadPool::ThreadFunc() {
-    std::cout << "begin threadFunc tid : " <<std::this_thread::get_id() << std::endl;
+    // std::cout << "begin threadFunc tid : " <<std::this_thread::get_id() << std::endl;
 
-    std::cout << "end threadFunc tid : " <<std::this_thread::get_id() << std::endl;
+    // std::cout << "end threadFunc tid : " <<std::this_thread::get_id() << std::endl;
+    for (;;) {
+        std::shared_ptr<Task> task;
+        {
+            // 获取锁
+            std::unique_lock<std::mutex> lock(taskQueueMtx_);
+            // 等待noempty条件
+                // this捕获 表明要访问当前类
+                // &引用捕获 表示捕获所有外部变量
+                // &当上下文中有其它局部变量或者对象时，也都会被捕获
+                // 下面两种实现都是可以的
+            std::cout << "tid:" << std::this_thread::get_id()
+            << "try to get the task!" << std::endl;
+            noempty_.wait(lock, [this]( ) -> bool {return !tasksQueue_.empty();});
+            //noempty_.wait(lock, [&]( ) -> bool {return tasksQueue_.size() > 0;});
+
+            std::cout << "tid:" << std::this_thread::get_id()
+            << "got the task successfully!" << std::endl;
+            // 从任务队列中取一个任务
+            task = tasksQueue_.front();
+            tasksQueue_.pop();
+            taskSize_--;
+
+            // 如果依然由任务，继续通知其它线程（消费者）执行任务
+            if (tasksQueue_.size() > 0) {
+                noempty_.notify_all();
+            }
+            // 取出任务，通知生产者任务队列不满
+            nofull_.notify_all();
+        }
+        //应该把锁释放掉,那么可以把上面用局部作用域框起来
+        // 或者这里可以显性地解锁lock.unlock();
+
+        // 由当前线程执行该任务
+        if (NULL != task) {
+            task->run();
+            //执行完一个任务,怎么去把这个Task任务delete？
+        }
+    }
 }
 
 

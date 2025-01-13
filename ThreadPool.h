@@ -10,12 +10,56 @@
 #include <condition_variable>
 #include <functional>
 
+// Any类型：可以接受任意数据的类型
+class Any {
+public:
+    Any() = default;
+    ~Any() = default;
+    // 左值的引用拷贝构造和赋值???
+    Any(const Any&) = delete;
+    Any& operator=(const Any&) = delete;
+    // 右值的引用拷贝构造和赋值???
+    Any(Any&&) = default;
+    Any& operator=(Any&&) = default;
+
+    template <typename T>  //T:int Driver<int>
+    Any(T data) : base_(make_unique<Driver>(data)) {}
+
+    // 把Any对象存储的数据提取出来
+    template <typename T>
+    T cast_() {
+        // 我们怎么从base_找到它所指向的Driver对象，从它里面取出data成员变量
+        // 基类指针 -> 派生类指针
+        Driver<T> *pd = dynamic_cast<Driver<T>>(base_.get());
+        if (pd == nullptr) {
+            throw "type is unmatch!";
+        }
+        return pd->data_;
+    };
+
+private:
+    // 基类类型
+    class Base {
+    public:
+        virtual ~Base() = default;
+    };
+
+    template <typename T>
+    class Driver : public Base {
+    public:
+        Driver(data) : data_(data) {}
+        T data_;
+    };
+
+    std::unique_ptr<Base> base_;
+};
+
 
 // 任务抽象基类
 class Task {
 public:
     // 用户可以自定义容易任务类型，从Task继承，重写run方法，实现自定义的任务处理
-    virtual void run() = 0;
+    virtual Any run() = 0;
 };
 // 线程池模式
 // ??class，杜绝枚举类型不同，枚举项相同的情况
@@ -39,6 +83,18 @@ private:
     ThreadFunc func_;
     
 };
+
+/*
+example
+ThreadPool pool;
+pool.start(4);
+
+class MyTask : public task{
+public: 
+    void run() { // 线程代码}；
+}
+pool.submitTask(std::make_shared<MyTask>());
+*/
 // 线程池类型
 class ThreadPool {
 public:
@@ -68,7 +124,7 @@ private:
     void ThreadFunc();
 
 private:
-    std::vector<Thread*> threads_;  // 线程列表
+    std::vector<std::unique_ptr<Thread>> threads_;  // 线程列表
     size_t initThreadSize_;  // 初始线程数量
 
     // 基类裸指针 -? 使用智能指针能保证类的生命周期嘛
