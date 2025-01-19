@@ -53,7 +53,7 @@ private:
 
     std::unique_ptr<Base> base_;
 };
-
+// 实现一个信号量类
 class Semaphore {
 public:
     Semaphore(int limit = 0) : limit_(limit) { limit_ = 0;}
@@ -76,6 +76,22 @@ private:
     std::mutex mutex_;
     std::condition_variable cond_;
     int limit_;
+};
+
+// 实现接受提交到线程池的Task任务执行结束之后的返回值类型Result
+class Result {
+public:
+    Result() = default;
+    ~Result() = default;
+    Result(const Result& value) = default;
+    Result& operate=(const Result& value){};
+    Result(Result&&) = default;
+    Result& operate=(Result&&) = default;
+
+
+private:
+    Any any_;  // 存储任务的返回数据
+    Semaphore sem_;  // 线程通信信号量
 };
 
 // 任务抽象基类
