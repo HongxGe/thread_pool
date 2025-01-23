@@ -26,7 +26,7 @@ void ThreadPool::setTaskQueueMaxThreadHold(int threadHold) {
 }
 
 // 给线程池提交任务  用户向线程池里面的任务队列提交任务 生产者
-void ThreadPool::submitTask(std::shared_ptr<Task> sp) {
+Result ThreadPool::submitTask(std::shared_ptr<Task> sp) {
     // 获取锁
     std::unique_lock<std::mutex> lock(taskQueueMtx_);
 
@@ -47,7 +47,7 @@ void ThreadPool::submitTask(std::shared_ptr<Task> sp) {
     {
         // 表示nofull_等待1s，条件依然没有满足
         std::cerr << "task queue is full, submit task fail." << std::endl;
-        return;
+        return Result(sp, false);
     }
 
     std::cout << "tid:" << std::this_thread::get_id()
@@ -57,6 +57,9 @@ void ThreadPool::submitTask(std::shared_ptr<Task> sp) {
     taskSize_++;
     // 提示消费者任务队列不为空 在noempty_提示,通知消费者，可以赶紧分配任务
     noempty_.notify_all();
+
+    // 返回任务的返回值对象
+    return Result(sp);
 
 
 }
@@ -142,4 +145,36 @@ void Thread::start() {
     std::thread t(func_);  // 对于C++11来说：有线程对象t，和线程函数func_
     // 线程对象t在start结束时，线程对象t的作用域周期到了，t和func_是有绑定关系的,两者一起挂
     t.detach();  // 设置成分离线程，线程对象t结束时，func_还在执行  -->linux thread库·pthread_detach pthread_t设置成分离线程
+}
+/******************************************************************
+ * Task方法实现
+******************************************************************/
+// 为什么这里需要给run再封装一次？
+/**
+ * 因为
+ */
+void Task::exec() {
+    result_->setVal(run());  
+    //run();  // 这里发生多态调用
+}
+
+/******************************************************************
+ * Result方法实现
+******************************************************************/
+Result::Result(std::shared_ptr<Task> task, bool isVaild = true)
+    : task_(task)
+    , isVaild_(isVaild) {
+    task_->setResult(this);
+}
+void Result::setVal(Any any) {  // 任务执行完的时候调用
+    // 存储Task的返回值any对象
+    any_ = std::move(any);
+    // 已经获取任务的返回值，增加信号量的资源，线程通信
+    sem_.post();
+}
+ 
+Any Result::get() {  // 用户调用的
+    if (!isVaild_) return "";
+    sem_.wait();  // Task任务如果没有执行完，这里会阻塞用户的线程。
+    return std::move(any_);
 }

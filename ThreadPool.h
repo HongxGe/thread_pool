@@ -23,7 +23,7 @@ public:
     Any& operator=(Any&&) = default;
 
     template <typename T>  //T:int Driver<int>
-    Any(T data) : base_(make_unique<Driver>(data)) {}
+    Any(T data) : base_(std::make_unique<Driver>(data)) {}
 
     // 把Any对象存储的数据提取出来
     template <typename T>
@@ -47,12 +47,13 @@ private:
     template <typename T>
     class Driver : public Base {
     public:
-        Driver(data) : data_(data) {}
+        Driver(T data) : data_(data) {}
         T data_;
     };
 
     std::unique_ptr<Base> base_;
 };
+
 // 实现一个信号量类
 class Semaphore {
 public:
@@ -78,20 +79,33 @@ private:
     int limit_;
 };
 
+// Task类型的前置声明
+class Task;
+
 // 实现接受提交到线程池的Task任务执行结束之后的返回值类型Result
 class Result {
 public:
     Result() = default;
     ~Result() = default;
+
+    Result(std::shared_ptr<Task> task, bool isVaild = true);
     Result(const Result& value) = default;
-    Result& operate=(const Result& value){};
+    Result& operator=(const Result& value)= default;
     Result(Result&&) = default;
-    Result& operate=(Result&&) = default;
+    Result& operator=(Result&&) = default;
+
+    // setVal方法，获取任务执行完的返回值
+    void setVal(Any any);
+
+    // get方法，用户调用个体方法获取任务的返回值
+    Any get();
 
 
 private:
     Any any_;  // 存储任务的返回数据
     Semaphore sem_;  // 线程通信信号量
+    std::shared_ptr<Task> task_; // 指向对应获取返回值的任务对象
+    std::atomic_bool isVaild_;  // 返回值是否有效
 };
 
 // 任务抽象基类
@@ -99,6 +113,10 @@ class Task {
 public:
     // 用户可以自定义容易任务类型，从Task继承，重写run方法，实现自定义的任务处理
     virtual Any run() = 0;
+    void exec();
+    void setResult(Result* result);
+private:
+  Result* result_;
 };
 // 线程池模式
 // ??class，杜绝枚举类型不同，枚举项相同的情况
@@ -149,7 +167,7 @@ public:
     void setTaskQueueMaxThreadHold(int threadHold);
 
     // 给线程池提交任务
-    void submitTask(std::shared_ptr<Task> sp);
+    Result submitTask(std::shared_ptr<Task> sp);
 
     //开启线程池
     void start(int initThreadSize = 4);
